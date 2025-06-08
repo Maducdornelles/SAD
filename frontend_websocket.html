@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitoramento do Paciente</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background-color: #111827;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .alert-box {
+      animation: fadeInDown 0.5s ease forwards;
+      border-width: 3px;
+      transition: all 0.3s ease-in-out;
+      cursor: pointer;
+    }
+
+    .normal {
+      border-color: #10b981;
+      background-color: rgba(16, 185, 129, 0.05);
+    }
+
+    .moderado {
+      border-color: #facc15;
+      background-color: rgba(250, 204, 21, 0.05);
+    }
+
+    .critico {
+      border-color: #ef4444;
+      background-color: rgba(239, 68, 68, 0.05);
+    }
+
+    .expanded {
+      grid-column: span 2;
+      transform: scale(1.05);
+    }
+
+    @keyframes fadeInDown {
+      from {
+        opacity: 0;
+        transform: translateY(-15px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen p-6 text-white">
+  <div class="max-w-7xl mx-auto">
+    <h1 class="text-5xl font-extrabold text-center mb-12 text-white">Monitoramento em Tempo Real do Paciente</h1>
+
+    <!-- GRÁFICO DE BATIMENTOS -->
+    <div class="bg-gray-800 rounded-3xl shadow-xl p-6 mb-10">
+      <h2 class="text-2xl font-bold mb-4 text-white text-center">Batimentos Cardíacos (bpm)</h2>
+      <canvas id="heartChart" height="100"></canvas>
+    </div>
+
+    <!-- GRID DE ALERTAS -->
+    <div id="alert-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- Alertas aparecerão aqui -->
+    </div>
+  </div>
+
+  <script>
+    const alertGrid = document.getElementById("alert-grid");
+    const socket = new WebSocket("ws://localhost:6789");
+
+    const ctx = document.getElementById("heartChart").getContext("2d");
+    const heartData = {
+      labels: [],
+      datasets: [
+        {
+          label: "Normal",
+          data: [],
+          borderColor: "#10b981",
+          backgroundColor: "rgba(16, 185, 129, 0.2)",
+          tension: 0.4,
+          fill: true,
+          pointRadius: 3,
+          spanGaps: true,
+        },
+        {
+          label: "Moderado",
+          data: [],
+          borderColor: "#facc15",
+          backgroundColor: "rgba(250, 204, 21, 0.2)",
+          tension: 0.4,
+          fill: true,
+          pointRadius: 3,
+          spanGaps: true,
+        },
+        {
+          label: "Crítico",
+          data: [],
+          borderColor: "#ef4444",
+          backgroundColor: "rgba(239, 68, 68, 0.2)",
+          tension: 0.4,
+          fill: true,
+          pointRadius: 3,
+          spanGaps: true,
+        },
+      ],
+    };
+
+    const heartChart = new Chart(ctx, {
+      type: 'line',
+      data: heartData,
+      options: {
+        animation: false,
+        scales: {
+          x: {
+            display: true,
+            title: {
+              display: true,
+              text: 'Horário',
+              color: '#d1d5db'
+            },
+            ticks: { color: '#9ca3af' },
+            grid: { color: '#374151' }
+          },
+          y: {
+            min: 30,
+            max: 180,
+            ticks: { stepSize: 30, color: '#9ca3af' },
+            grid: { color: '#374151' }
+          }
+        },
+        plugins: {
+          legend: { display: true, labels: { color: '#d1d5db' } }
+        }
+      }
+    });
+
+    socket.onmessage = function(event) {
+      const mensagem = event.data;
+      const time = new Date().toLocaleTimeString();
+
+      const dadosMatch = mensagem.match(/Freq\. Respiratória: (.*?), Freq\. Cardíaca: (.*?) bpm, Temperatura: (.*?)ºC, Pressão Arterial: (.*?), Oxigenação: (.*?)%/);
+      const alertasMatch = mensagem.match(/ALERTAS:\s*(.*)/);
+
+      if (!dadosMatch) return;
+
+      const [_, fr, fc, temp, pa, oxi] = dadosMatch;
+      const bpm = parseInt(fc);
+      const alertasRaw = alertasMatch ? alertasMatch[1] : "";
+
+      let nivel = "normal";
+      if (alertasRaw.toLowerCase().includes("crítico")) {
+        nivel = "critico";
+      } else if (alertasRaw.toLowerCase().includes("moderado")) {
+        nivel = "moderado";
+      }
+
+      const card = document.createElement("div");
+      card.className = `alert-box p-5 rounded-2xl ${nivel}`;
+      card.innerHTML = `
+        <div class="text-center">
+          ${nivel === "critico" ? `<h2 class="text-lg font-semibold mb-2 text-red-400">Alerta Crítico</h2>` : ""}
+          <p class="text-sm"><strong>Frequência Respiratória:</strong> ${fr}</p>
+          <p class="text-sm"><strong>Frequência Cardíaca:</strong> ${fc} bpm</p>
+          <p class="text-sm"><strong>Temperatura:</strong> ${temp}ºC</p>
+          <p class="text-sm"><strong>Pressão Arterial:</strong> ${pa}</p>
+          <p class="text-sm"><strong>Oxigenação:</strong> ${oxi}%</p>
+          ${alertasRaw ? `
+            <div class="mt-4 text-sm">
+              <h3 class="font-medium text-gray-300 mb-1">Alertas:</h3>
+              <ul class="space-y-1">
+                ${alertasRaw.split(";").map(alerta => {
+                  const a = alerta.trim();
+                  const cor = a.toLowerCase().includes("crítico") ? "text-red-400" : a.toLowerCase().includes("moderado") ? "text-yellow-300" : "text-green-300";
+                  return `<li class="${cor}">${a}</li>`;
+                }).join("")}
+              </ul>
+            </div>
+          ` : ""}
+          <span class="text-xs text-gray-400 block mt-3">${time}</span>
+        </div>
+      `;
+
+      card.addEventListener("click", () => {
+        card.classList.toggle("expanded");
+      });
+
+      alertGrid.prepend(card);
+
+      const maxCards = 12;
+      const minExibe = nivel === "normal" ? 4 : nivel === "moderado" ? 6 : 10;
+
+      while (alertGrid.childNodes.length > maxCards) {
+        const last = alertGrid.lastChild;
+        const isCritico = last.classList.contains("critico");
+        const isModerado = last.classList.contains("moderado");
+        const isNormal = last.classList.contains("normal");
+
+        if (nivel === "critico" && isCritico) break;
+        if (nivel === "moderado" && (isCritico || isModerado)) break;
+        if (nivel === "normal" && (isCritico || isModerado || isNormal)) break;
+
+        alertGrid.removeChild(last);
+      }
+
+      heartData.labels.push(time);
+      heartData.datasets[0].data.push(nivel === "normal" ? bpm : null);
+      heartData.datasets[1].data.push(nivel === "moderado" ? bpm : null);
+      heartData.datasets[2].data.push(nivel === "critico" ? bpm : null);
+      heartChart.update();
+    };
+
+    socket.onerror = function(e) {
+      console.error("Erro no WebSocket:", e);
+    };
+
+    socket.onclose = function() {
+      const aviso = document.createElement("div");
+      aviso.className = "p-4 bg-yellow-100 text-yellow-700 rounded-2xl text-center font-semibold shadow col-span-full";
+      aviso.textContent = "⚠️ Conexão perdida com o servidor de alertas.";
+      alertGrid.prepend(aviso);
+    };
+  </script>
+</body>
+</html>
